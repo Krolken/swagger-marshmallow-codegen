@@ -1,9 +1,7 @@
-from collections import namedtuple, OrderedDict
+from collections import OrderedDict
 from marshmallow import Schema, ValidationError, SchemaOpts
 from marshmallow import marshalling
 from prestring.utils import reify
-
-StrategyContext = namedtuple("StrategyContext", "data, schemas, results, errors, compacted")
 
 
 class ComposedOpts(SchemaOpts):
@@ -35,8 +33,7 @@ class OneOfSchema(Schema):
         self._marshal = ComposedMarshaller(self._marshal, finder, self.final_check)
         self._unmarshal = ComposedUnmarshaller(self._unmarshal, finder, self.final_check)
 
-    def final_check(self, sctx):
-        compacted = sctx.compacted
+    def final_check(self, *, data, schemas, results, errors, compacted):
         if len(compacted) == 1:
             return compacted[0], {}
         elif len(compacted) > 1:
@@ -44,17 +41,16 @@ class OneOfSchema(Schema):
                 compacted[0].update(other)
 
             satisfied = []
-            for i, err in enumerate(sctx.errors):
+            for i, err in enumerate(errors):
                 if not err:
-                    satisfied.append(sctx.schemas[i].__class__.__name__)
+                    satisfied.append(schemas[i].__class__.__name__)
             return compacted[0], {
                 "_schema": ["satisfied both of {}, not only one".format(satisfied)]
             }
         else:
-            results = sctx.results
             for other in results[1:]:
                 results[0].update(other)
-            return sctx.data if not results else results[0], {
+            return data if not results else results[0], {
                 "_schema":
                 ["not matched, any of {}".format([s.__class__.__name__ for s in self.schemas])]
             }
@@ -75,17 +71,15 @@ class AnyOfSchema(Schema):
         self._marshal = ComposedMarshaller(self._marshal, finder, self.final_check)
         self._unmarshal = ComposedUnmarshaller(self._unmarshal, finder, self.final_check)
 
-    def final_check(self, sctx):
-        compacted = sctx.compacted
+    def final_check(self, *, data, schemas, results, errors, compacted):
         if len(compacted) >= 1:
             for other in compacted[1:]:
                 compacted[0].update(other)
             return compacted[0], {}
         else:
-            results = sctx.results
             for other in results[1:]:
                 results[0].update(other)
-            return sctx.data if not results else results[0], {
+            return data if not results else results[0], {
                 "_schema":
                 ["not matched, any of {}".format([s.__class__.__name__ for s in self.schemas])]
             }
@@ -194,10 +188,9 @@ class ComposedMarshaller(marshalling.Marshaller):
                 compacted.append(r)
             results.append(r)
             errors.append(err)
-        sctx = StrategyContext(
+        return self.final_check(
             data=data, results=results, errors=errors, schemas=schemas, compacted=compacted
         )
-        return self.final_check(sctx)
 
 
 class ComposedUnmarshaller(marshalling.Unmarshaller):
@@ -248,7 +241,6 @@ class ComposedUnmarshaller(marshalling.Unmarshaller):
                 compacted.append(r)
             results.append(r)
             errors.append(err)
-        sctx = StrategyContext(
+        return self.final_check(
             data=data, results=results, errors=errors, schemas=schemas, compacted=compacted
         )
-        return self.final_check(sctx)
